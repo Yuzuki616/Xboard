@@ -183,6 +183,12 @@ class OrderService
 
     private function getSurplusValueByPeriod(User $user, Order $order)
     {
+        $expiredAtByOrder = $user->expired_at;
+        // if expired
+        if ($expiredAtByOrder < time()) return;
+        // traffic
+        $nowUserTraffic = $user->transfer_enable / 1073741824;
+        if (!$nowUserTraffic) return;
         $orders = Order::where('user_id', $user->id)
             ->whereNotIn('period', ['reset_price', 'onetime_price'])
             ->where('status', Order::STATUS_COMPLETED)
@@ -192,21 +198,41 @@ class OrderService
         $orderAmountSum = 0;
         $orderMonthSum = 0;
         $lastValidateAt = 0;
+        $expiredTime = $user->expired_at;
+        $nowNotExpiredTime=0;
+        $nowAmount=0;
         foreach ($orders as $item) {
             $period = self::STR_TO_TIME[$item['period']];
             if (strtotime("+{$period} month", $item['created_at']) < time()) continue;
+            $expiredTime = strtotime("-{$period} month", $expiredTime);
             $lastValidateAt = $item['created_at'];
-            $orderMonthSum = $period + $orderMonthSum;
-            $orderAmountSum = $orderAmountSum + ($item['total_amount'] + $item['balance_amount'] + $item['surplus_amount'] - $item['refund_amount']);
+            if ($expiredTime <= time()){
+                $nowNotExpiredTime=strtotime("+1 month", $expiredTime)-time();
+                $nowAmount=($item['total_amount'] + $item['balance_amount'] + $item['surplus_amount'] - $item['refund_amount']);
+                break;
+            }else{
+                $orderMonthSum = $period + $orderMonthSum;
+                $orderAmountSum = $orderAmountSum + ($item['total_amount'] + $item['balance_amount'] + $item['surplus_amount'] - $item['refund_amount']);
+            }
         }
-        if (!$lastValidateAt) return;
-        $expiredAtByOrder = strtotime("+{$orderMonthSum} month", $lastValidateAt);
-        if ($expiredAtByOrder < time()) return;
-        $orderSurplusSecond = $expiredAtByOrder - time();
+        $expiredAtByOrder = $user->expired_at;
+        $orderSurplusSecond=$expiredAtByOrder-time();
+        if ($orderSurplusSecond>$nowNotExpiredTime){
+            $orderSurplusSecond-=$nowNotExpiredTime;
+        }else{
+            $orderSurplusSecond=0;
+        }
         $orderRangeSecond = $expiredAtByOrder - $lastValidateAt;
-        $avgPrice = $orderAmountSum / $orderRangeSecond;
-        $orderSurplusAmount = $avgPrice * $orderSurplusSecond;
-        if (!$orderSurplusSecond || !$orderSurplusAmount) return;
+        $avgPrice = ($orderAmountSum+$nowAmount)/$orderRangeSecond;
+
+        // now surplus
+        $notUsedTraffic = $nowUserTraffic - (($user->u + $user->d) / 1073741824);
+        $avgTraffic=$nowAmount/$nowUserTraffic;
+        $nowSurplusAmount=min($notUsedTraffic*$avgTraffic,$nowNotExpiredTime*$avgPrice);
+
+        // surplus
+        $orderSurplusAmount = $avgPrice * $orderSurplusSecond-10+$nowSurplusAmount;
+        if (!($orderSurplusSecond+$nowNotExpiredTime) || !($orderSurplusAmount)) return;
         $order->surplus_amount = $orderSurplusAmount > 0 ? $orderSurplusAmount : 0;
         $order->surplus_order_ids = array_column($orders, 'id');
     }
