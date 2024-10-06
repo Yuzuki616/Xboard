@@ -25,6 +25,7 @@ class Server
         ];
         $request->validate([
             'token' => [
+                "required",
                 "string",
                 function ($attribute, $value, $fail) {
                     if ($value !== admin_setting('server_token')) {
@@ -34,7 +35,7 @@ class Server
             ],
             'node_id' => 'required',
             'node_type' => [
-                'nullable',
+                'required',
                 'regex:/^(?i)(hysteria|hysteria2|vless|trojan|vmess|v2ray|tuic|shadowsocks|shadowsocks-plugin)$/',
                 function ($attribute, $value, $fail) use ($aliasTypes, $request) {
                     $request->merge([$attribute => strtolower(isset ($aliasTypes[$value]) ? $aliasTypes[$value] : $value)]);
