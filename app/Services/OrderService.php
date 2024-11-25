@@ -196,26 +196,25 @@ class OrderService
             ->toArray();
         if (!$orders) return;
         $orderAmountSum = 0;
-        $orderMonthSum = 0;
         $lastValidateAt = 0;
         $expiredTime = $user->expired_at;
         $nowNotExpiredTime=0;
-        $nowAmount=0;
         foreach ($orders as $item) {
             $period = self::STR_TO_TIME[$item['period']];
             if (strtotime("+{$period} month", $item['created_at']) < time()) continue;
             $expiredTime = strtotime("-{$period} month", $expiredTime);
             $lastValidateAt = $item['created_at'];
-            if ($expiredTime <= time()){
-                $nowNotExpiredTime=strtotime("+1 month", $expiredTime)-time();
-                $nowAmount=($item['total_amount'] + $item['balance_amount'] + $item['surplus_amount'] - $item['refund_amount']);
+            $orderAmountSum = $orderAmountSum + ($item['total_amount'] + $item['balance_amount'] + $item['surplus_amount'] - $item['refund_amount']);
+            $t=time();
+            if ($expiredTime <= $t){
+                for (;$nowNotExpiredTime<=$t;)
+                {
+                    $nowNotExpiredTime=strtotime("+1 month", $expiredTime);
+                }
+                $nowNotExpiredTime=$nowNotExpiredTime-time();
                 break;
-            }else{
-                $orderMonthSum = $period + $orderMonthSum;
-                $orderAmountSum = $orderAmountSum + ($item['total_amount'] + $item['balance_amount'] + $item['surplus_amount'] - $item['refund_amount']);
             }
         }
-        $expiredAtByOrder = $user->expired_at;
         $orderSurplusSecond=$expiredAtByOrder-time();
         if ($orderSurplusSecond>$nowNotExpiredTime){
             $orderSurplusSecond-=$nowNotExpiredTime;
@@ -223,15 +222,13 @@ class OrderService
             $orderSurplusSecond=0;
         }
         $orderRangeSecond = $expiredAtByOrder - $lastValidateAt;
-        $avgPrice = ($orderAmountSum+$nowAmount)/$orderRangeSecond;
+        $avgPrice = $orderAmountSum/$orderRangeSecond;
 
         // now surplus
-        $notUsedTraffic = $nowUserTraffic - (($user->u + $user->d) / 1073741824);
-        $avgTraffic=$nowAmount/$nowUserTraffic;
-        $nowSurplusAmount=min($notUsedTraffic*$avgTraffic,$nowNotExpiredTime*$avgPrice);
-
+        $notUsedPercent=($nowUserTraffic - (($user->u + $user->d) / 1073741824))/$nowUserTraffic;
+        $nowNotExpiredTime*=$notUsedPercent;
         // surplus
-        $orderSurplusAmount = $avgPrice * $orderSurplusSecond-10+$nowSurplusAmount;
+        $orderSurplusAmount = $avgPrice * ($orderSurplusSecond+$nowNotExpiredTime)-10;
         if (!($orderSurplusSecond+$nowNotExpiredTime) || !($orderSurplusAmount)) return;
         $order->surplus_amount = $orderSurplusAmount > 0 ? $orderSurplusAmount : 0;
         $order->surplus_order_ids = array_column($orders, 'id');
